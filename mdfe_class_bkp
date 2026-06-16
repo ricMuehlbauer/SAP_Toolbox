@@ -1,0 +1,110 @@
+*&---------------------------------------------------------------------*
+*& Form zf_envia_xml
+*&---------------------------------------------------------------------*
+*& Envia o XML para o repositório externo
+*&---------------------------------------------------------------------*
+*&      --> p_process
+*&      --> p_docnum
+*&      --> p_lineid
+*&      --> p_id
+*&      --> p_bukrs
+*&      --> p_branch
+*&      --> p_tpamb
+*&      --> p_uuid
+*&      --> p_uuid_ev
+*&---------------------------------------------------------------------*
+FORM zf_envia_xml USING p_process
+                        p_docnum
+                        p_lineid
+                        p_id
+                        p_bukrs
+                        p_branch
+                        p_tpamb
+                        p_uuid
+                        p_uuid_ev.
+
+  DATA: w_return  TYPE bapiret2,
+        l_xstring TYPE xstring,
+        l_event   TYPE j_1bnfe_ext_event.
+
+  TRY.
+      IF p_auto = abap_true.
+        v_xml_content = v_o_processor->get_file( iv_environment_type = p_tpamb
+                                                 iv_action           = c_autorizacao
+                                                 iv_uuid             = p_uuid ).
+      ELSEIF p_canc = abap_true.
+        v_xml_content = v_o_processor->get_file( iv_environment_type = p_tpamb
+                                                 iv_action           = c_cancelamento
+                                                 iv_uuid             = p_uuid_ev ).
+
+        l_event = c_canc_event.
+      ELSE.
+        v_xml_content = v_o_processor->get_file( iv_environment_type = p_tpamb
+                                                 iv_action           = c_encerramento
+                                                 iv_uuid             = p_uuid_ev ).
+
+        l_event = c_final_event.
+      ENDIF.
+    CATCH cx_nfe_cloud_download_error cx_sy_dyn_call_illegal_type.
+  ENDTRY.
+
+  IF v_xml_content IS INITIAL.
+    v_tipo_erro = '01'.
+
+    PERFORM zf_log_erro_1 USING p_process
+                                p_docnum
+                                p_lineid
+                                p_id
+                                p_bukrs
+                                p_branch
+                                v_tipo_erro. " Salvar log de erro na tabela ZTBLE_MDFE_LOG
+  ELSE.
+    CALL FUNCTION 'SCMS_BASE64_DECODE_STR'
+      EXPORTING
+        input  = v_xml_content-file_content
+      IMPORTING
+        output = l_xstring
+      EXCEPTIONS
+        failed = 1
+        OTHERS = 2.
+
+    IF sy-subrc IS INITIAL AND l_xstring IS NOT INITIAL.
+      IF v_rfcdest IS NOT INITIAL.
+        CALL FUNCTION 'ZFBC_FILE_STORAGE_LOCAL_SET' DESTINATION v_rfcdest
+          EXPORTING
+            i_xml_string  = l_xstring
+            i_acckey      = p_id
+            i_origem      = '2'
+            i_event       = l_event
+            i_event_seqno = COND #( WHEN l_event IS NOT INITIAL THEN '01' ELSE '' )
+          IMPORTING
+            e_return      = w_return.
+      ELSE.
+        CALL FUNCTION 'ZFBC_FILE_STORAGE_LOCAL_SET'
+          EXPORTING
+            i_xml_string  = l_xstring
+            i_acckey      = p_id
+            i_origem      = '2'
+            i_event       = l_event
+            i_event_seqno = COND #( WHEN l_event IS NOT INITIAL THEN '01' ELSE '' )
+          IMPORTING
+            e_return      = w_return.
+      ENDIF.
+    ENDIF.
+
+    IF sy-subrc IS NOT INITIAL OR w_return-type = 'E'.
+      v_tipo_erro = '02'.
+
+      PERFORM zf_log_erro_2 USING p_process
+                                  p_docnum
+                                  p_lineid
+                                  p_id
+                                  p_bukrs
+                                  p_branch
+                                  v_tipo_erro
+                                  v_xml_content. " Salvar log de erro na tabela ZTBLE_MDFE_LOG
+    ENDIF.
+  ENDIF.
+
+  CLEAR: l_xstring, l_event.
+ENDFORM. 
