@@ -1,0 +1,2175 @@
+*& Report ZCPI_LOGS
+
+REPORT ZCPI_LOGS.
+
+tables: ztbbc_log_cpi.
+
+************************************************************************
+* Variáveis, tabelas e estruturas
+************************************************************************
+data: v_splitter_main     type ref to cl_gui_splitter_container,
+      v_splitter_main_btp type ref to cl_gui_splitter_container,
+      v_container_o       type ref to cl_gui_container,
+      v_container_btp_o   type ref to cl_gui_container,
+      v_container_u       type ref to cl_gui_container,
+      v_container_btp_u   type ref to cl_gui_container,
+      v_editor            TYPE REF TO cl_gui_textedit,
+      v_editor_btp        TYPE REF TO cl_gui_textedit,
+      v_init,
+      v_init_btp,
+      v_xml               type string.
+
+types: begin of y_ZTBBC_LOG_CPI.
+types:   icone    type ICON_D,
+         iconebtp type ICON_D.
+         include STRUCTURE ZTBBC_LOG_CPI.
+types: end of y_ZTBBC_LOG_CPI.
+
+TYPES: BEGIN OF y_messagelogs.
+*      Get MessageLogs
+TYPES: IntegrationFlowName TYPE string,
+       data                type sy-datum,
+       hora                type sy-uzeit,
+       LogStart            TYPE string,
+       LogEnd              TYPE string,
+       MessageGuid         TYPE string,
+       CorrelationId       TYPE string,
+       Status              TYPE string,
+       LogLevel            TYPE string,
+       CustomStatus        TYPE string,
+       OriginComponentName TYPE string,
+       LocalComponentName  TYPE string,
+       TransactionId       TYPE string,
+       datagmt             type sy-datum,
+       horagmt             type sy-uzeit.
+TYPES: END OF y_messagelogs.
+
+TYPES: BEGIN OF y_customheader.
+*      Get customheader
+TYPES: Id    TYPE string,
+       Name  TYPE string,
+       Value TYPE string.
+TYPES: END OF y_customheader.
+
+TYPES: BEGIN OF y_attachment.
+*      Get customheader
+TYPES: Id          TYPE string,
+       MessageGuid TYPE string,
+       TimeStamp   TYPE string,
+       Name        TYPE string,
+       ContentType TYPE string,
+       PayloadSize TYPE string.
+TYPES: END OF y_attachment.
+
+types: begin of y_estatistica.
+types: bukrs          type ZTBBC_LOG_CPI-bukrs,
+       iflow          type ZTBBC_LOG_CPI-iflow,
+       qtde_bukrs(15) type p DECIMALS 0,
+       qtde_iflow(15) type p DECIMALS 0,
+       MSG_SIZE       type ZTBBC_LOG_CPI-MSG_SIZE,
+       msg_size_kb    type p decimals 3,
+       msg_size_mb    type p decimals 6.
+types: end of y_estatistica.
+
+DATA: t_ZTBBC_LOG_CPI TYPE TABLE OF y_ZTBBC_LOG_CPI,
+      t_estatistica   TYPE TABLE OF y_estatistica,
+      t_rows          type lvc_t_row,
+      t_messagelogs   TYPE TABLE OF y_messagelogs,
+      t_customheader  TYPE TABLE OF y_customheader,
+      t_attachment    TYPE TABLE OF y_attachment.
+
+data: w_row          type lvc_s_row,
+      w_messagelogs  TYPE y_messagelogs,
+      w_customheader TYPE y_customheader,
+      w_attachment   TYPE y_attachment.
+
+************************************************************************
+*Classes
+************************************************************************
+CLASS lcl_event_handler DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+*   User Command
+      on_user_command
+        FOR EVENT user_command OF cl_gui_alv_grid
+        IMPORTING e_ucomm,
+
+*     Double-click control
+      handle_double_click
+        FOR EVENT double_click OF cl_gui_alv_grid
+        IMPORTING e_row e_column ES_ROW_NO.
+
+ENDCLASS.
+
+CLASS lcl_event_handler IMPLEMENTATION.
+  METHOD on_user_command.
+    PERFORM zf_handle_user_command USING e_ucomm .
+  ENDMETHOD.
+
+*Handle Double Click
+  METHOD handle_double_click .
+    PERFORM zf_handle_double_click USING e_row e_column es_row_no.
+  ENDMETHOD .
+
+ENDCLASS.
+data: v_event_handler TYPE REF TO lcl_event_handler.
+
+************************************************************************
+* Tela de seleção
+************************************************************************
+SELECTION-SCREEN BEGIN OF BLOCK Z1 WITH FRAME TITLE text-015.
+  PARAMETERS: p_btp RADIOBUTTON GROUP Y1 USER-COMMAND zf,
+              p_sap RADIOBUTTON GROUP Y1 DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK Z1.
+
+*Integration Suite
+SELECTION-SCREEN BEGIN OF BLOCK D1 WITH FRAME TITLE text-016.
+  SELECTION-SCREEN BEGIN OF BLOCK D3 WITH FRAME TITLE text-035.
+    PARAMETERS: P_msgid TYPE ZTBBC_LOG_CPI-messageid MODIF ID z1,
+                P_corid type ZTBBC_LOG_CPI-correlationid MODIF ID z1.
+  SELECTION-SCREEN END OF BLOCK D3.
+  SELECTION-SCREEN BEGIN OF BLOCK D2 WITH FRAME TITLE text-036.
+    PARAMETERS: P_ZIFLOW TYPE ZTBBC_LOG_CPI-IFLOW DEFAULT '*' MODIF ID z1,
+                P_Zstat  type ZDEBC_STATUS_IFLOW MODIF ID z1,
+                P_custna type ZDEBC_CUSTHEADER MODIF ID z1,
+                P_custva type ZDEBC_CUSTHEADER MODIF ID z1,
+                p_zdata1 TYPE ZTBBC_LOG_CPI-DATA DEFAULT sy-datum MODIF ID z1,
+                p_zhora1 TYPE ZTBBC_LOG_CPI-HORA DEFAULT sy-uzeit MODIF ID z1,
+                p_zdata2 TYPE ZTBBC_LOG_CPI-DATA DEFAULT sy-datum MODIF ID z1,
+                p_zhora2 TYPE ZTBBC_LOG_CPI-HORA DEFAULT sy-uzeit MODIF ID z1.
+    SELECTION-SCREEN BEGIN OF BLOCK h2.
+      SELECTION-SCREEN PUSHBUTTON /30(17) p_dthora USER-COMMAND dthora MODIF ID z1.
+      PARAMETERS: p_zp15 RADIOBUTTON GROUP H1 MODIF ID z1,
+                  p_zp60 RADIOBUTTON GROUP H1 MODIF ID z1 DEFAULT 'X',
+                  p_zp1d RADIOBUTTON GROUP H1 MODIF ID z1,
+                  p_zp2d RADIOBUTTON GROUP H1 MODIF ID z1.
+    SELECTION-SCREEN END OF BLOCK h2.
+    PARAMETERS: p_fuso type int4 MODIF ID z1 DEFAULT '3-',
+                p_dst  TYPE c AS CHECKBOX MODIF ID z1. "Horário de Verão Daylight Saving
+  SELECTION-SCREEN END OF BLOCK D2.
+SELECTION-SCREEN END OF BLOCK D1.
+
+*SAP
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-001.
+  SELECT-OPTIONS: s_bukrs for ZTBBC_LOG_CPI-BUKRS MODIF ID b1,
+                  s_data  FOR ZTBBC_LOG_CPI-DATA DEFAULT sy-datum MODIF ID b1,
+                  s_hora  FOR ZTBBC_LOG_CPI-HORA MODIF ID b1,
+                  s_MATNR FOR ZTBBC_LOG_CPI-matnr MODIF ID b1,
+                  s_LIFNR for ZTBBC_LOG_CPI-lifnr MODIF ID b1,
+                  s_KUNNR FOR ZTBBC_LOG_CPI-kunnr MODIF ID b1,
+                  s_PERNR FOR ZTBBC_LOG_CPI-pernr MODIF ID b1,
+                  s_EBELN FOR ZTBBC_LOG_CPI-ebeln MODIF ID b1,
+                  s_BANFN for ZTBBC_LOG_CPI-banfn MODIF ID b1,
+                  s_VBELN for ZTBBC_LOG_CPI-vbeln MODIF ID b1,
+                  s_PROCe FOR ZTBBC_LOG_CPI-cod_processo MODIF ID b1,
+                  s_usua  for ZTBBC_LOG_CPI-usuario MODIF ID b1,
+                  s_prog  FOR ZTBBC_LOG_CPI-programa MATCHCODE OBJECT ZSHBC_PROGRAMA no INTERVALS MODIF ID b1,
+                  s_iflow FOR ZTBBC_LOG_CPI-IFLOW MATCHCODE OBJECT ZSHBC_IFLOW no INTERVALS MODIF ID b1,
+                  s_http  FOR ZTBBC_LOG_CPI-HTTP_CODE MATCHCODE OBJECT ZSHBC_HTTPCODE no INTERVALS MODIF ID b1,
+                  s_direc FOR ZTBBC_LOG_CPI-DIRECAO no INTERVALS MODIF ID b1,
+                  s_stat  FOR ZTBBC_LOG_CPI-status no INTERVALS MODIF ID b1.
+
+  SELECTION-SCREEN BEGIN OF BLOCK c1 WITH FRAME TITLE text-011.
+    PARAMETERS: p_log RADIOBUTTON GROUP A1 DEFAULT 'X' MODIF ID b1.
+    PARAMETERS: p_est  RADIOBUTTON GROUP A1 MODIF ID b1,
+                p_estb type c AS CHECKBOX MODIF ID b1.
+  SELECTION-SCREEN End OF BLOCK c1.
+SELECTION-SCREEN END OF BLOCK b1.
+
+*Exibição
+SELECTION-SCREEN BEGIN OF BLOCK e1 .
+  SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE text-002.
+    PARAMETERS: p_hor RADIOBUTTON GROUP A DEFAULT 'X' MODIF ID b1,
+                p_ver RADIOBUTTON GROUP A MODIF ID b1.
+  SELECTION-SCREEN END OF BLOCK b2.
+SELECTION-SCREEN END OF BLOCK e1.
+
+*************************************************************************
+*INITIALIZATION.
+*************************************************************************
+INITIALIZATION.
+  perform zf_ajusta_horas.
+  p_dthora = text-020.
+
+*************************************************************************
+*AT SELECTION-SCREEN OUTPUT.
+*************************************************************************
+AT SELECTION-SCREEN OUTPUT.
+  PERFORM zf_loopatscreen.
+
+AT SELECTION-SCREEN.
+  IF sy-ucomm = 'DTHORA'.
+    perform zf_ajusta_horas.
+  ENDIF.
+
+************************************************************************
+*START-OF-SELECTION.
+************************************************************************
+START-OF-SELECTION.
+
+  perform zf_saneamento_log.
+*******************************************************************
+* BTP - Integration Suite
+*******************************************************************
+  if p_btp is NOT INITIAL.
+
+    if p_zdata1 is INITIAL or p_zdata2 is INITIAL or
+       p_zhora1 is INITIAL or p_zhora2 is INITIAL.
+      MESSAGE text-018 TYPE 'I'.
+      stop.
+    else.
+      if ( P_custna is NOT INITIAL and P_custva is INITIAL ) or
+         ( P_custva is not INITIAL and P_custna is INITIAL ).
+        MESSAGE text-032 TYPE 'I'.
+        stop.
+      else.
+*       Busca LOG
+        perform zf_message_log.
+        if t_messagelogs[] is INITIAL.
+*         Sem dados para seleção.
+          MESSAGE s000(oo) WITH TEXT-019 DISPLAY LIKE 'E'.
+          stop.
+        else.
+          CALL SCREEN 200.
+        endif.
+
+      endif.
+    endif.
+
+  endif."  if p_btp is NOT INITIAL.
+
+*******************************************************************
+* SAP
+*******************************************************************
+  if p_sap is NOT INITIAL.
+
+    if s_bukrs[] is INITIAL.
+      MESSAGE text-017 TYPE 'I'.
+      stop.
+    else.
+
+      PERFORM zf_autorizacao.
+      IF t_ZTBBC_LOG_CPI[] IS INITIAL.
+        MESSAGE text-003 TYPE 'I'.
+        stop.
+      else.
+        if p_est is NOT INITIAL.
+          free: t_estatistica.
+          perform zf_estatisticas.
+        endif.
+        CALL SCREEN 100.
+      ENDIF.
+
+    ENDIF.
+
+  ENDIF."  if p_sap is NOT INITIAL.
+
+
+************************************************************************
+*Modules
+************************************************************************
+*&---------------------------------------------------------------------*
+*& Module STATUS_0100 OUTPUT
+*&---------------------------------------------------------------------*
+MODULE ZF_STATUS_0100 OUTPUT.
+  DATA: t_sort TYPE lvc_t_sort,
+        w_sort TYPE lvc_s_sort.
+
+  SET PF-STATUS 'ZGSD_LOG'.
+
+********************************************
+* Log
+********************************************
+  if p_log is  NOT INITIAL.
+    IF v_init is initial.
+
+      if p_hor eq 'X'.
+        v_splitter_main = new #(
+                                 parent = cl_gui_container=>default_screen
+*                           nv_autodef_progid_dynnr = abap_true
+                                 rows                    = 2
+                                 columns                 = 1 ).
+        v_container_o = v_splitter_main->get_container( row = 1 column = 1 ).
+        v_container_u = v_splitter_main->get_container( row = 2 column = 1 ).
+      else.
+        v_splitter_main = new #(
+                                 parent = cl_gui_container=>default_screen
+*                           nv_autodef_progid_dynnr = abap_true
+                                 rows                    = 1
+                                 columns                 = 2 ).
+        v_container_o = v_splitter_main->get_container( row = 1 column = 1 ).
+        v_container_u = v_splitter_main->get_container( row = 1 column = 2 ).
+      endif.
+      v_splitter_main->set_column_width( id = 1 width = 60 ).
+
+      data(v_alv) = new cl_gui_alv_grid( i_parent      = v_container_o " in default container einbetten
+                                         i_appl_events = abap_true ).                     " Ereignisse als Applikationsevents registrieren
+
+      data: v_salv type ref to cl_salv_table.
+
+      cl_salv_table=>factory( importing
+                                r_salv_table = v_salv
+                              changing
+                                t_table      = t_ZTBBC_LOG_CPI ).
+      data(t_fcat) = cl_salv_controller_metadata=>get_lvc_fieldcatalog( r_columns      = v_salv->get_columns( )
+
+                                                                         r_aggregations = v_salv->get_aggregations( ) ).
+
+      delete t_fcat where FieldNAME = 'MANDT'.
+      delete t_fcat where FieldNAME = 'TIMESTAMP'.
+      loop at t_fcat ASSIGNING FIELD-SYMBOL(<f_fcat>).
+        if <f_fcat>-fieldname = 'MATNR' or
+           <f_fcat>-fieldname = 'LIFNR' or
+           <f_fcat>-fieldname = 'KUNNR' or
+           <f_fcat>-fieldname = 'PERNR' or
+           <f_fcat>-fieldname = 'EBELN' or
+           <f_fcat>-fieldname = 'BANFN' or
+           <f_fcat>-fieldname = 'VBELN' or
+           <f_fcat>-fieldname = 'COD_PROCESSO' or
+           <f_fcat>-fieldname = 'USUARIO'.
+          clear: <f_fcat>-key.
+        endif.
+        case <f_fcat>-fieldname.
+          when 'ICONE'.
+            <f_fcat>-SCRTEXT_L = text-029.
+            <f_fcat>-outputlen = 5.
+          when 'ICONEBTP'.
+            <f_fcat>-SCRTEXT_L = text-034.
+            <f_fcat>-outputlen = 4.
+        ENDCASE.
+        <f_fcat>-REPTEXT   = <f_fcat>-SCRTEXT_L.
+        <f_fcat>-SCRTEXT_M = <f_fcat>-SCRTEXT_L.
+        <f_fcat>-SCRTEXT_S = <f_fcat>-SCRTEXT_L.
+      endloop.
+
+      data(v_layout) = value lvc_s_layo(
+                                            zebra      = abap_true
+                                            cwidth_opt = 'A'
+                                            grid_title = text-004
+                                            COL_OPT    =  abap_true
+                                          ).
+
+      free: t_sort.
+      w_sort-fieldname = 'BUKRS'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      w_sort-fieldname = 'DATA'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      w_sort-fieldname = 'HORA'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      w_sort-fieldname = 'IFLOW'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      w_sort-fieldname = 'PROGRAMA'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      w_sort-fieldname = 'DIRECAO'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      data v_variant_det type disvariant.
+      v_variant_det-report   = sy-repid.
+      v_variant_det-username = sy-uname.
+
+      CREATE OBJECT v_event_handler.
+      SET HANDLER v_event_handler->on_user_command FOR v_alv.
+      SET HANDLER v_event_handler->handle_double_click FOR v_alv.
+
+      v_alv->set_table_for_first_display( exporting
+                                            i_bypassing_buffer = abap_false  " Puffer ausschalten
+                                            i_save             = 'A'         " Anzeigevariante sichern
+                                            is_layout          = v_layout   " Layout
+                                            is_variant         = v_variant_det
+
+                                          changing
+                                            it_fieldcatalog    = t_fcat     " Feldkatalog
+                                            it_sort            = t_sort
+                                            it_outtab          = t_ZTBBC_LOG_CPI ). " Ausgabetabelle
+
+      CREATE OBJECT v_editor
+        EXPORTING
+          parent = v_container_u.
+      v_editor->set_readonly_mode( 1 ).
+
+      cl_gui_alv_grid=>set_focus( control = v_alv ).
+      cl_abap_list_layout=>suppress_toolbar( ).
+
+      v_init = 'X'.
+
+      CALL METHOD cl_gui_cfw=>flush
+        EXCEPTIONS
+          cntl_system_error = 1
+          cntl_error        = 2.
+
+    ENDIF."IF v_init is initial.
+  endif. "  if p_log is  NOT INITIAL.
+
+********************************************
+* Estatísticas
+********************************************
+  if p_est is NOT INITIAL.
+
+    data(v_alv2) = new cl_gui_alv_grid( i_parent      = cl_gui_container=>default_screen " in default container einbetten
+                                       i_appl_events = abap_true ).                     " Ereignisse als Applikationsevents registrieren
+
+    data: v_ealv type ref to cl_salv_table.
+
+    IF v_init is initial.
+*     Somente ALV sem envio.
+      cl_salv_table=>factory( importing
+                                r_salv_table = v_ealv
+                              changing
+                                t_table      = t_estatistica ).
+      data(t_fcat_local) = cl_salv_controller_metadata=>get_lvc_fieldcatalog( r_columns      = v_ealv->get_columns( )
+
+                                                                         r_aggregations = v_ealv->get_aggregations( ) ).
+
+      delete t_fcat_local where FieldNAME = 'MANDT'.
+
+      loop at t_fcat_local ASSIGNING FIELD-SYMBOL(<f_fcat_local>).
+        case <f_fcat_local>-fieldname.
+          when 'QTDE_BUKRS'.
+            <f_fcat_local>-SCRTEXT_L = <f_fcat_local>-SCRTEXT_m = <f_fcat_local>-SCRTEXT_s = text-009.
+            <f_fcat_local>-do_sum = abap_true.
+            clear <f_fcat_local>-no_sum.
+          when 'QTDE_IFLOW'.
+            <f_fcat_local>-SCRTEXT_L = <f_fcat_local>-SCRTEXT_m = <f_fcat_local>-SCRTEXT_s = text-010.
+            <f_fcat_local>-do_sum = abap_true.
+            clear <f_fcat_local>-no_sum.
+          when 'MSG_SIZE'.
+            <f_fcat_local>-SCRTEXT_L = <f_fcat_local>-SCRTEXT_m = <f_fcat_local>-SCRTEXT_s = text-012.
+            <f_fcat_local>-do_sum = abap_true.
+            clear <f_fcat_local>-no_sum.
+          when 'MSG_SIZE_KB'.
+            <f_fcat_local>-SCRTEXT_L = <f_fcat_local>-SCRTEXT_m = <f_fcat_local>-SCRTEXT_s = text-013.
+            <f_fcat_local>-do_sum = abap_true.
+            clear <f_fcat_local>-no_sum.
+          when 'MSG_SIZE_MB'.
+            <f_fcat_local>-SCRTEXT_L = <f_fcat_local>-SCRTEXT_m = <f_fcat_local>-SCRTEXT_s = text-014.
+            <f_fcat_local>-do_sum = abap_true.
+            clear <f_fcat_local>-no_sum.
+        endcase.
+      endloop.
+
+      data(v_layout_local) = value lvc_s_layo(
+                                            zebra      = abap_true
+                                            cwidth_opt = 'A'
+                                            grid_title = text-004
+                                          ).
+
+      free: t_sort.
+      w_sort-fieldname = 'BUKRS'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      w_sort-fieldname = 'IFLOW'.
+      w_sort-up = 'X'.
+      APPEND w_sort TO t_sort.
+
+      if  p_estb is INITIAL."Não detalhar
+        delete t_sort WHERE fieldname = 'IFLOW'.
+        delete t_fcat_local WHERE fieldname = 'IFLOW'.
+        delete t_fcat_local WHERE fieldname = 'QTDE_IFLOW'.
+      endif.
+
+      data v_variant_det_local type disvariant.
+      v_variant_det_local-report   = sy-repid.
+      v_variant_det_local-username = sy-uname.
+
+*      CREATE OBJECT v_event_handler.
+*      SET HANDLER v_event_handler->on_user_command     FOR v_alv.
+*      SET HANDLER v_event_handler->handle_double_click FOR v_alv.
+*      SET HANDLER v_event_handler->on_toolbar          FOR v_alv.
+
+      v_alv2->set_table_for_first_display( exporting
+                                            i_bypassing_buffer = abap_false " Puffer ausschalten
+                                            i_save             = 'A'         " Anzeigevariante sichern
+                                            is_layout          = v_layout_local   " Layout
+                                            is_variant         = v_variant_det_local
+
+                                          changing
+                                            it_fieldcatalog    = t_fcat_local     " Feldkatalog
+                                            it_sort            = t_sort
+                                            it_outtab          = t_estatistica ). " Ausgabetabelle
+
+      cl_gui_alv_grid=>set_focus( control = v_alv2 ).
+      cl_abap_list_layout=>suppress_toolbar( ).
+
+      v_init = 'X'.
+
+      CALL METHOD cl_gui_cfw=>flush
+        EXCEPTIONS
+          cntl_system_error = 1
+          cntl_error        = 2.
+    endif.
+  endif."  if p_est is NOT INITIAL.
+
+ENDMODULE.
+
+
+*&---------------------------------------------------------------------*
+*& Module STATUS_0200 OUTPUT
+*&---------------------------------------------------------------------*
+MODULE ZF_STATUS_0200 OUTPUT.
+  DATA: t_sort_btp TYPE lvc_t_sort,
+        w_sort_btp TYPE lvc_s_sort.
+
+  SET PF-STATUS 'ZGSD_LOG'.
+
+********************************************
+* Log Integration Suite
+********************************************
+  IF v_init_btp is initial.
+
+    if p_hor eq 'X'.
+      v_splitter_main_btp = new #(
+                               parent = cl_gui_container=>default_screen
+*                           nv_autodef_progid_dynnr = abap_true
+                               rows                    = 2
+                               columns                 = 1 ).
+      v_container_btp_o = v_splitter_main_btp->get_container( row = 1 column = 1 ).
+      v_container_btp_u = v_splitter_main_btp->get_container( row = 2 column = 1 ).
+    else.
+      v_splitter_main_btp = new #(
+                               parent = cl_gui_container=>default_screen
+*                           nv_autodef_progid_dynnr = abap_true
+                               rows                    = 1
+                               columns                 = 2 ).
+      v_container_btp_o = v_splitter_main_btp->get_container( row = 1 column = 1 ).
+      v_container_btp_u = v_splitter_main_btp->get_container( row = 1 column = 2 ).
+    endif.
+    v_splitter_main_btp->set_column_width( id = 1 width = 65 ).
+
+    data(v_alv_btp) = new cl_gui_alv_grid( i_parent      = v_container_btp_o " in default container einbetten
+                                       i_appl_events = abap_true ).                     " Ereignisse als Applikationsevents registrieren
+
+    data: v_salv_btp type ref to cl_salv_table.
+
+    cl_salv_table=>factory( importing
+                              r_salv_table = v_salv_btp
+                            changing
+                              t_table      = t_messagelogs ).
+    data(t_fcat_btp) = cl_salv_controller_metadata=>get_lvc_fieldcatalog( r_columns      = v_salv_btp->get_columns( )
+
+                                                                       r_aggregations = v_salv_btp->get_aggregations( ) ).
+
+
+    delete t_fcat_btp where FieldNAME = 'LOGSTART'.
+    delete t_fcat_btp where FieldNAME = 'LOGEND'.
+    delete t_fcat_btp where FieldNAME = 'CUSTOMSTATUS'.
+    delete t_fcat_btp where FieldNAME = 'ORIGINCOMPONENTNAME'.
+    delete t_fcat_btp where FieldNAME = 'LOCALCOMPONENTNAME'.
+    delete t_fcat_btp where FieldNAME = 'TRANSACTIONID'.
+    delete t_fcat_btp where FieldNAME = 'CORRELATIONID'.
+    delete t_fcat_btp where FieldNAME = 'DATAGMT'.
+    delete t_fcat_btp where FieldNAME = 'HORAGMT'.
+    loop at t_fcat_btp ASSIGNING FIELD-SYMBOL(<f_fcat_btp>).
+      if <f_fcat_btp>-fieldname = 'INTEGRATIONFLOWNAME' or
+         <f_fcat_btp>-fieldname = 'DATA' or
+         <f_fcat_btp>-fieldname = 'HORA'.
+        <f_fcat_btp>-key = 'X'.
+      endif.
+
+      case <f_fcat_btp>-fieldname.
+        when 'INTEGRATIONFLOWNAME'.
+          <f_fcat_btp>-SCRTEXT_L = Text-021.
+          <f_fcat_btp>-outputlen = 60.
+        when 'STATUS'.
+          <f_fcat_btp>-SCRTEXT_L = text-022.
+          <f_fcat_btp>-outputlen = 10.
+        when 'DATA'.
+          <f_fcat_btp>-SCRTEXT_L = text-023.
+          <f_fcat_btp>-outputlen = 10.
+        when 'HORA'.
+          <f_fcat_btp>-SCRTEXT_L = text-024.
+          <f_fcat_btp>-outputlen = 8.
+        when 'DATAGMT'.
+          <f_fcat_btp>-SCRTEXT_L = text-030.
+          <f_fcat_btp>-outputlen = 10.
+        when 'HORAGMT'.
+          <f_fcat_btp>-SCRTEXT_L = text-031.
+          <f_fcat_btp>-outputlen = 8.
+        when 'MESSAGEGUID'.
+          <f_fcat_btp>-SCRTEXT_L = text-025.
+          <f_fcat_btp>-outputlen = 30.
+        when 'LOCALCOMPONENTNAME'.
+          <f_fcat_btp>-SCRTEXT_L = text-027.
+          <f_fcat_btp>-outputlen = 15.
+        when 'LOGLEVEL'.
+          <f_fcat_btp>-SCRTEXT_L = text-028.
+          <f_fcat_btp>-outputlen = 10.
+      endcase.
+      <f_fcat_btp>-REPTEXT   = <f_fcat_btp>-SCRTEXT_L.
+      <f_fcat_btp>-SCRTEXT_M = <f_fcat_btp>-SCRTEXT_L.
+      <f_fcat_btp>-SCRTEXT_S = <f_fcat_btp>-SCRTEXT_L.
+    endloop.
+
+    data(v_layout_btp) = value lvc_s_layo(
+                                          zebra      = abap_true
+*                                          cwidth_opt = 'A'
+                                          grid_title = text-004
+                                          COL_OPT    =  abap_false
+                                        ).
+
+    free: t_sort_btp.
+
+    w_sort_btp-fieldname = 'DATA'.
+    w_sort_btp-down = 'X'.
+    APPEND w_sort_btp TO t_sort_btp.
+
+    w_sort_btp-fieldname = 'HORA'.
+    w_sort_btp-down = 'X'.
+    APPEND w_sort_btp TO t_sort_btp.
+
+    data v_variant_det_btp type disvariant.
+    v_variant_det_btp-report   = sy-repid.
+    v_variant_det_btp-username = sy-uname.
+
+    CREATE OBJECT v_event_handler.
+    SET HANDLER v_event_handler->on_user_command FOR v_alv_btp.
+    SET HANDLER v_event_handler->handle_double_click FOR v_alv_btp.
+
+    v_alv_btp->set_table_for_first_display( exporting
+                                          i_bypassing_buffer = abap_false   " Puffer ausschalten
+                                          i_save             = 'A'         " Anzeigevariante sichern
+                                          is_layout          = v_layout_btp   " Layout
+                                          is_variant         = v_variant_det_btp
+
+                                        changing
+                                          it_fieldcatalog    = t_fcat_btp     " Feldkatalog
+                                          it_sort            = t_sort_btp
+                                          it_outtab          = t_messagelogs ). " Ausgabetabelle
+
+    CREATE OBJECT v_editor_btp
+      EXPORTING
+        parent = v_container_btp_u.
+    v_editor_btp->set_readonly_mode( 1 ).
+
+    cl_gui_alv_grid=>set_focus( control = v_alv_btp ).
+    cl_abap_list_layout=>suppress_toolbar( ).
+
+    v_init_btp = 'X'.
+
+    CALL METHOD cl_gui_cfw=>flush
+      EXCEPTIONS
+        cntl_system_error = 1
+        cntl_error        = 2.
+
+  ENDIF."IF v_init_btp is initial.
+
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*&      Module  ZF_USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+MODULE ZF_USER_COMMAND_0100 INPUT.
+  case sy-ucomm .
+    when '&F03'.
+      IF P_SAP IS NOT INITIAL.
+        if p_log is NOT INITIAL.
+          CALL METHOD v_container_o->free.
+          CALL METHOD v_container_u->free.
+        endif.
+      endif.
+      set SCREEN 0.
+      LEAVE SCREEN.
+
+    WHEN 'ATUALIZAR'.  " Código do botão de atualização
+      IF P_SAP IS NOT INITIAL.
+        if p_log is  NOT INITIAL.
+          PERFORM zf_autorizacao.
+          v_alv->refresh_table_display( ).
+        endif.
+      endif.
+  ENDCASE.
+
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*&      Module  ZF_USER_COMMAND_0200  INPUT
+*&---------------------------------------------------------------------*
+MODULE ZF_USER_COMMAND_0200 INPUT.
+  case sy-ucomm .
+    when '&F03'.
+      IF P_BTP IS NOT INITIAL.
+        CALL METHOD v_container_BTP_o->free.
+        CALL METHOD v_container_BTP_u->free.
+      ENDIF.
+      set SCREEN 0.
+      LEAVE SCREEN.
+
+    WHEN 'ATUALIZAR'.  " Código do botão de atualização
+      IF P_BTP IS NOT INITIAL.
+        if p_log is  NOT INITIAL.
+          PERFORM zf_message_log.
+          v_alv_BTP->refresh_table_display( ).
+        endif.
+      endif.
+  ENDCASE.
+
+ENDMODULE.
+
+
+************************************************************************
+*PERFORMS
+************************************************************************
+*&---------------------------------------------------------------------*
+*&     Form zf_handle_double_click
+*&---------------------------------------------------------------------*
+FORM zf_handle_double_click  USING    P_E_ROW     STRUCTURE LVC_S_ROW
+                                      P_E_COLUMN  STRUCTURE LVC_S_COL
+                                      P_ES_ROW_NO STRUCTURE LVC_S_ROID.
+
+  data: l_payload_string  TYPE string,
+        l_payload_string2 TYPE string,
+        l_payload_string3 TYPE string,
+        l_xml             type ref to cl_xml_document,
+        l_exception_xml   TYPE REF TO cx_xslt_runtime_error,
+        l_exception_json  TYPE REF TO CX_XSLT_RUNTIME_ERROR,
+        l_root            TYPE REF TO cx_root,
+        l_url(200)        TYPE c VALUE 'https://corp-AMBIENTE.integrationsuite.cfapps.br10.hana.ondemand.com/shell/monitoring/Messages/%7B%22identifier%22%3A%22GUID%22%7D',
+        l_pzhora1         type sy-uzeit,
+        l_pzhora2         type sy-uzeit,
+        l_ifloname(200)   type c,
+        l_iflowauth(40)    type c.
+
+  if p_btp is NOT INITIAL.
+    if P_E_COLUMN = 'MESSAGEGUID'.
+*     Abre URL no Navegador
+      READ TABLE t_messagelogs INTO w_messagelogs INDEX P_ES_ROW_NO-ROW_ID.
+      if sy-subrc eq 0 and w_messagelogs-Messageguid ne ''.
+*         Ajusta URL
+        if sy-host cs '05c' or sy-host cs '05a'.
+*         Muda para parâmetros de Produção
+          REPLACE 'AMBIENTE' IN l_url WITH 'prd'.
+        else.
+          REPLACE 'AMBIENTE' IN l_url WITH 'dev'.
+        endif.
+        REPLACE 'GUID' IN l_url WITH w_messagelogs-MessageGuid.
+
+        CALL FUNCTION 'CALL_BROWSER'
+          EXPORTING
+            URL                    = l_url
+          EXCEPTIONS
+            FRONTEND_NOT_SUPPORTED = 1
+            FRONTEND_ERROR         = 2
+            PROG_NOT_FOUND         = 3
+            NO_BATCH               = 4
+            UNSPECIFIED_ERROR      = 5
+            OTHERS                 = 6.
+      endif.
+    else.
+*     Abre Text Editor
+      READ TABLE t_messagelogs into w_messagelogs
+                                 INDEX P_ES_ROW_NO-ROW_ID.
+      IF sy-subrc = 0.
+*       Busca Custom Header
+        perform zf_message_customheader USING w_messagelogs-messageguid
+                                        CHANGING l_payload_string.
+
+        if l_payload_string ne ''.
+*         Achou Custom Header
+          l_payload_string = |Custom Header\n{ l_payload_string }\n|.
+          v_editor_btp->set_textstream( EXPORTING text = l_payload_string ).
+        else.
+*         Não achou Custom Header
+          l_payload_string = |No Custom Header\n{ l_payload_string }|.
+          v_editor_btp->set_textstream( EXPORTING text = l_payload_string ).
+        endif.
+
+        l_payload_string = |{ l_payload_string }\n---------------------------------------------------\n|.
+
+*       Busca Error Informattion
+        clear: l_payload_string2.
+        perform zf_message_log_errorinfo USING w_messagelogs-messageguid
+                                         CHANGING l_payload_string2.
+        if l_payload_string2 ne ''.
+*         Achou Erro
+          l_payload_string = |{ l_payload_string }Error Information\n{ l_payload_string2 }|.
+          v_editor_btp->set_textstream( EXPORTING text = l_payload_string ).
+        else.
+*         Não achou erro
+          l_payload_string = |{ l_payload_string }No error Information|.
+          v_editor_btp->set_textstream( EXPORTING text = l_payload_string ).
+        endif.
+
+        l_payload_string = |{ l_payload_string }\n---------------------------------------------------\n|.
+
+*       Busca Attachemnts
+
+        clear: l_payload_string2.
+        free: t_attachment.
+        perform zf_message_log_attach USING w_messagelogs-messageguid
+                                            '' "ID Anexo
+                                      CHANGING l_payload_string2.
+        if t_attachment[] is NOT INITIAL.
+*         Achou Attachemnts
+          loop at t_attachment into w_attachment.
+            perform zf_message_log_attach USING w_messagelogs-messageguid
+                                                w_attachment-id "ID Anexo
+                                          CHANGING l_payload_string2.
+            if l_payload_string2 ne ''.
+              l_payload_string = |{ l_payload_string }\n Attachments: { w_attachment-name }\n|.
+              l_iflowauth = l_ifloname = w_messagelogs-IntegrationFlowName.
+              AUTHORITY-CHECK OBJECT 'ZO:IFLOW02'
+               ID 'ACTVT' FIELD '03'
+               ID 'IFLOW' FIELD l_iflowauth.
+              if sy-subrc eq 0.
+                l_payload_string = |{ l_payload_string }\n { l_payload_string2 }|.
+              else.
+                l_payload_string = |{ l_payload_string }\n No authority to see payload. Check transaction SU53.\n|.
+              endif.
+            else.
+*             Não achou Attachemnts
+              l_payload_string = |{ l_payload_string }Attachments not found|.
+            endif.
+            l_payload_string = |{ l_payload_string }\n---------------------------------------------------\n|.
+          endloop.
+          v_editor_btp->set_textstream( EXPORTING text = l_payload_string ).
+        endif.
+
+      ENDIF ."READ TABLE t_messagelogs
+    endif.
+  endif." if p_btp is NOT INITIAL.
+
+  if p_sap is NOT INITIAL.
+
+    if P_E_COLUMN eq 'ICONEBTP'.
+*     Mostrar log no Integration Suite
+      READ TABLE T_ZTBBC_LOG_CPI REFERENCE INTO data(w_ztbbc_log_cpi2) INDEX P_E_ROW-index.
+      if sy-subrc eq 0.
+        if w_ztbbc_log_cpi2->correlationid ne ''.
+          SUBMIT ZCPI_LOGS WITH p_sap    = ''
+                                            WITH p_btp    = 'X'
+                                            WITH P_corid = w_ZTBBC_LOG_CPI2->correlationid
+                                            AND RETURN.
+        else.
+          if w_ztbbc_log_cpi2->Messageid ne ''.
+            SUBMIT ZCPI_LOGS WITH p_sap    = ''
+                                              WITH p_btp    = 'X'
+                                              WITH P_msgid = w_ZTBBC_LOG_CPI2->messageid
+                                              AND RETURN.
+          else.
+            l_pzhora1 = w_ZTBBC_LOG_CPI2->hora - 5.
+            l_pzhora2 = w_ZTBBC_LOG_CPI2->hora + 5.
+            SUBMIT ZCPI_LOGS WITH p_sap    = ''
+                                              WITH p_btp    = 'X'
+                                              WITH P_ZIFLOW = w_ZTBBC_LOG_CPI2->iflow
+                                              WITH p_zdata1 = w_ZTBBC_LOG_CPI2->data
+                                              WITH p_zhora1 = l_pzhora1
+                                              WITH p_zdata2 = w_ZTBBC_LOG_CPI2->data
+                                              WITH p_zhora2 = l_pzhora2
+                                              AND RETURN.
+          endif."if w_ztbbc_log_cpi2->Messageid ne ''.
+        endif."if w_ztbbc_log_cpi2->correlationid ne ''.
+      endif."READ TABLE T_ZTBBC_LOG_CPI REFERENCE INTO data(w_ztbbc_log_cpi2) INDEX P_E_ROW-index.
+
+    elseif P_E_COLUMN eq 'MESSAGEID'.
+*   Abre URL no Navegador
+      READ TABLE T_ZTBBC_LOG_CPI REFERENCE INTO data(w_ztbbc_log_cpi3) INDEX P_E_ROW-index.
+      if sy-subrc eq 0 and w_ztbbc_log_cpi3->Messageid ne ''.
+*         Ajusta URL
+        if sy-host cs '05c' or sy-host cs '05a'.
+*           Muda para parâmetros de Produção
+          REPLACE 'AMBIENTE' IN l_url WITH 'prd'.
+        else.
+          REPLACE 'AMBIENTE' IN l_url WITH 'dev'.
+        endif.
+        REPLACE 'GUID' IN l_url WITH w_ztbbc_log_cpi3->Messageid.
+
+        CALL FUNCTION 'CALL_BROWSER'
+          EXPORTING
+            URL                    = l_url
+          EXCEPTIONS
+            FRONTEND_NOT_SUPPORTED = 1
+            FRONTEND_ERROR         = 2
+            PROG_NOT_FOUND         = 3
+            NO_BATCH               = 4
+            UNSPECIFIED_ERROR      = 5
+            OTHERS                 = 6.
+      endif.
+
+    elseif P_E_COLUMN eq 'CORRELATIONID'.
+*     Abre URL no Navegador
+      READ TABLE T_ZTBBC_LOG_CPI REFERENCE INTO data(w_ztbbc_log_cpi4) INDEX P_E_ROW-index.
+      if sy-subrc eq 0 and w_ztbbc_log_cpi4->Messageid ne ''.
+*         Ajusta URL
+        if sy-host cs '05c' or sy-host cs '05a'.
+*           Muda para parâmetros de Produção
+          REPLACE 'AMBIENTE' IN l_url WITH 'prd'.
+        else.
+          REPLACE 'AMBIENTE' IN l_url WITH 'dev'.
+        endif.
+        REPLACE 'GUID' IN l_url WITH w_ztbbc_log_cpi4->CORRELATIONID.
+
+        CALL FUNCTION 'CALL_BROWSER'
+          EXPORTING
+            URL                    = l_url
+          EXCEPTIONS
+            FRONTEND_NOT_SUPPORTED = 1
+            FRONTEND_ERROR         = 2
+            PROG_NOT_FOUND         = 3
+            NO_BATCH               = 4
+            UNSPECIFIED_ERROR      = 5
+            OTHERS                 = 6.
+      endif.
+
+    else.
+*     Mostrar log no SAP
+      READ TABLE t_ztbbc_log_cpi REFERENCE INTO data(w_ztbbc_log_cpi)
+                                 INDEX P_ES_ROW_NO-ROW_ID.
+      IF sy-subrc = 0.
+        l_iflowauth = w_ztbbc_log_cpi->iflow.
+        AUTHORITY-CHECK OBJECT 'ZO:IFLOW02'
+        ID 'ACTVT' FIELD '03'
+        ID 'IFLOW' FIELD l_iflowauth.
+        IF SY-SUBRC <> 0.
+*         Sem autorização para Iflow (payload)
+          message s000(oo) with text-033 w_ztbbc_log_cpi->iflow DISPLAY LIKE 'E'.
+        else.
+*         Buscar XML/JSON/TEXTO do IFLOW
+          SELECT single PAYLOAD
+            from ztbbc_log_cpi_pa
+            into @data(l_payload_xstring)
+            WHERE BUKRS     eq @w_ztbbc_log_cpi->bukrs and
+                  DATA      eq @w_ztbbc_log_cpi->data and
+                  HORA      eq @w_ztbbc_log_cpi->hora and
+                  IFLOW     eq @w_ztbbc_log_cpi->iflow and
+                  DIRECAO   eq @w_ztbbc_log_cpi->direcao and
+                  TIMESTAMP eq @w_ztbbc_log_cpi->timestamp.
+          if sy-subrc eq 0.
+
+            CALL FUNCTION 'ECATT_CONV_XSTRING_TO_STRING'
+              EXPORTING
+                IM_XSTRING = l_payload_xstring
+              IMPORTING
+                EX_STRING  = l_payload_string.
+
+            if l_payload_string ne ''.
+
+              if P_E_COLUMN eq 'ICONE'.
+*         Visualização no popup identada
+                case w_ztbbc_log_cpi->tipo.
+
+                  when 'XML'.
+                    TRY.
+                        create object l_xml.
+                        call method l_xml->parse_string
+                          exporting
+                            stream = l_payload_string. "xml_out is the variable which is holding the xml string
+                        call method l_xml->display.
+                      CATCH cx_root INTO l_root.
+*                   Erro no XML, exibição como texto
+                        message s000(oo) with text-006 DISPLAY LIKE 'W'.
+                        v_editor->set_textstream( EXPORTING text = l_payload_string ).
+                    endtry.
+
+                  when 'JSON'.
+                    try.
+                        CALL TRANSFORMATION sjson2html SOURCE XML l_payload_string
+                                         RESULT XML DATA(html).
+                        cl_abap_browser=>show_html( html_string = cl_abap_codepage=>convert_from( html ) ).
+                      catch CX_XSLT_RUNTIME_ERROR into l_exception_json.
+*                 Erro no XML, exibição como texto
+                        message s000(oo) with text-006 DISPLAY LIKE 'W'.
+                        v_editor->set_textstream( EXPORTING text = l_payload_string ).
+                    endtry.
+
+                  when 'TEXTO'.
+                    v_editor->set_textstream( EXPORTING text = l_payload_string ).
+
+                endcase.
+
+              else.
+*           Visualização pura no segundo container
+                case w_ztbbc_log_cpi->tipo.
+
+                  when 'XML'.
+                    v_editor->set_textstream( EXPORTING text = l_payload_string ).
+
+                  when 'JSON'.
+                    v_editor->set_textstream( EXPORTING text = l_payload_string ).
+
+                  when 'TEXTO'.
+                    v_editor->set_textstream( EXPORTING text = l_payload_string ).
+
+                endcase.
+
+              endif."from ztbbc_log_cpi_pa
+            endif."if v_payload_string ne ''.
+          endif."if P_E_COLUMN eq 'ICONE'.
+        ENDIF."AUTHORITY-CHECK OBJECT 'ZO:IFLOW02'
+      ENDIF ."READ TABLE t_ztbbc_log_cpi
+    ENDIF ."if P_E_COLUMN eq 'ICONEBTP'.
+  endif."if p_sap is NOT INITIAL.
+
+ENDFORM.   "zf_handle_double_click
+
+
+*&---------------------------------------------------------------------*
+*&     Form zf_handle_user_command
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*&      --> E_UCOMM
+*&---------------------------------------------------------------------*
+FORM zf_handle_user_command  USING P_E_UCOMM.
+  DATA: t_selected_rows TYPE lvc_t_roid,
+        w_selected_row  TYPE lvc_s_roid.
+
+  CALL METHOD v_alv_btp->get_selected_rows
+    IMPORTING
+      et_row_no = t_selected_rows.
+
+  if p_btp is NOT INITIAL.
+
+  endif.
+
+  if p_sap is NOT INITIAL.
+
+  endif.
+
+ENDFORM.   "zf_handle_user_command
+
+
+*&---------------------------------------------------------------------*
+*&     Form zf_autorizacao
+*&---------------------------------------------------------------------*
+FORM zf_autorizacao .
+  data: l_memory_id    type char30,
+        l_iflow_import type ztbbc_log_cpi-iflow.
+
+  SELECT bukrs
+         INTO TABLE @DATA(t_t001)
+         FROM t001
+         WHERE bukrs in @s_bukrs.
+  LOOP AT t_t001
+       ASSIGNING FIELD-SYMBOL(<f_t001>).
+    DATA(l_tabix) = sy-tabix.
+    AUTHORITY-CHECK OBJECT 'F_BKPF_BUK'
+    ID 'BUKRS' FIELD <f_t001>-bukrs
+    ID 'ACTVT' FIELD '03'.
+    IF sy-subrc <> 0. "Auth check failed
+      DELETE t_t001 INDEX l_tabix.
+    ENDIF.
+  ENDLOOP.
+
+  if t_t001[] is INITIAL.
+    MESSAGE s000(oo) WITH text-005 DISPLAY LIKE 'E'.
+    stop.
+  else.
+
+    if p_est is NOT INITIAL.
+      if s_data[] is INITIAL.
+        MESSAGE s000(oo) WITH text-008 DISPLAY LIKE 'E'.
+        stop.
+      endif.
+    endif.
+
+    SELECT mandt BUKRS DATA HORA IFLOW PROGRAMA DIRECAO TIMESTAMP MATNR
+           LIFNR KUNNR PERNR EBELN BANFN VBELN COD_PROCESSO
+           HTTP_CODE STATUS TIPO USUARIO MSG_SIZE MESSAGEID CORRELATIONID
+      FROM ZTBBC_LOG_CPI
+      INTO CORRESPONDING FIELDS OF TABLE t_ZTBBC_LOG_CPI
+      FOR ALL ENTRIES IN t_t001
+      WHERE BUKRS     eq t_t001-bukrs
+        AND DATA      IN s_data
+        AND HORA      IN s_hora
+        AND MATNR     IN s_MATNR
+        AND LIFNR     IN s_LIFNR
+        AND KUNNR     IN s_KUNNR
+        AND PERNR     IN s_PERNR
+        AND EBELN     IN s_EBELN
+        AND BANFN     IN s_BANFN
+        AND VBELN     IN s_VBELN
+        AND cod_processo IN s_PROCe
+        AND usuario   IN s_usua
+        AND PROGRAMA  IN s_prog
+        AND IFLOW     IN s_iflow
+        AND STATUS    IN s_stat
+        AND HTTP_CODE IN s_http
+        AND DIRECAO   IN s_direc.
+    if t_ZTBBC_LOG_CPI[] is NOT INITIAL.
+      LOOP AT t_ZTBBC_LOG_CPI ASSIGNING FIELD-SYMBOL(<f_tab>).
+        if <f_tab>-tipo = 'TEXTO'.
+          <f_tab>-icone = '@OC@'.
+        elseif <f_tab>-TIPO = 'XML'.
+          <f_tab>-icone = '@R4@'.
+        elseif <f_tab>-TIPO = 'JSON'.
+          <f_tab>-icone = '@0P@'.
+        endif.
+        <f_tab>-iconebtp = '@RJ@'." ICON_WD_WEB_PROJECT
+      ENDLOOP.
+    endif.
+  endif.
+
+ENDFORM.   "zf_autorizacao
+
+*&---------------------------------------------------------------------*
+*&     Form zf_saneamento_log
+*&---------------------------------------------------------------------*
+FORM zf_saneamento_log .
+  data: t_ztbbc_parametros type TABLE of ztbbc_parametros,
+        l_dias_log         TYPE i value '365',
+        l_dias_log_pa      TYPE i value '180',
+        l_usuario          TYPE sy-uname,
+        l_erro             type REF TO CX_SY_ITAB_LINE_NOT_FOUND,
+        l_erro_user        type REF TO CX_SY_ITAB_LINE_NOT_FOUND,
+        l_data             type sy-datum.
+
+* Verificar se é background
+  if sy-batch is NOT INITIAL.
+    CALL FUNCTION 'ZFSD_CONSTANTES1'
+      EXPORTING
+        I_CODE           = 'ZCPI_LOGS'
+      TABLES
+        ZTBBC_PARAMETROS = t_ztbbc_parametros
+      EXCEPTIONS
+        NOT_FOUND        = 1
+        OTHERS           = 2.
+
+    TRY.
+        l_dias_log = t_ztbbc_parametros[ zparam = 'DIASLOG' ]-ZVLPAR.
+      CATCH CX_SY_ITAB_LINE_NOT_FOUND INTO l_erro.
+    ENDTRY.
+
+    TRY.
+        l_dias_log_pa = t_ztbbc_parametros[ zparam = 'DIASLOGPAYLOAD' ]-ZVLPAR.
+      CATCH CX_SY_ITAB_LINE_NOT_FOUND INTO l_erro.
+    ENDTRY.
+
+    TRY.
+        l_usuario = t_ztbbc_parametros[ zparam = 'USUARIO' ZVLPAR = sy-uname ]-ZVLPAR.
+      CATCH CX_SY_ITAB_LINE_NOT_FOUND INTO l_erro_user.
+    ENDTRY.
+
+    if l_erro_user is INITIAL.
+      if sy-uname = l_usuario.
+        l_data = sy-datum - l_dias_log.
+        delete from ztbbc_log_cpi WHERE data <= l_data.
+        l_data = sy-datum - l_dias_log_pa.
+        delete from ztbbc_log_cpi_pa WHERE data <= l_data.
+        commit WORK AND WAIT.
+      endif.
+    endif.
+
+  endif.
+
+ENDFORM.   "zf_saneamento_log
+
+*&---------------------------------------------------------------------*
+*&     Form zf_estatisticas
+*&---------------------------------------------------------------------*
+FORM zf_estatisticas .
+  data: w_estatistica   TYPE y_estatistica,
+        l_n_bukrs(15)   TYPE p DECIMALS 0,
+        l_n_iflow(15)   TYPE p DECIMALS 0,
+        l_n_bytes_buk   TYPE ZTBBC_LOG_CPI-msg_size,
+        l_n_bytes_ifl   TYPE ZTBBC_LOG_CPI-msg_size,
+        l_n_kbytes_buk  TYPE p DECIMALS 6,
+        l_n_kbytes_ifl  TYPE p DECIMALS 6,
+        l_n_mbytes_buk  TYPE p DECIMALS 6,
+        l_n_mbytes_ifl  TYPE p DECIMALS 6,
+        l_bukrs_ant     TYPE bukrs,
+        l_iflow_ant     TYPE ZTBBC_LOG_CPI-iflow,
+        w_ZTBBC_LOG_CPI type y_ZTBBC_LOG_CPI.
+
+  sort t_ZTBBC_LOG_CPI[] by bukrs iflow.
+  free: t_estatistica.
+
+  if p_estb is not INITIAL."Detalhar por interface
+
+    loop at t_ZTBBC_LOG_CPI INTO w_ZTBBC_LOG_CPI.
+
+      IF l_bukrs_ant IS INITIAL AND l_iflow_ant IS INITIAL.
+*       Primeiro registro
+        l_bukrs_ant = w_ZTBBC_LOG_CPI-bukrs.
+        l_iflow_ant = w_ZTBBC_LOG_CPI-iflow.
+        l_n_bukrs = 0.
+        l_n_iflow = 0.
+        l_n_bytes_buk = 0.
+        l_n_bytes_ifl = 0.
+        l_n_kbytes_buk = 0.
+        l_n_kbytes_ifl = 0.
+        l_n_mbytes_buk = 0.
+        l_n_mbytes_ifl = 0.
+      ENDIF.
+
+*     Se mudou o BUKRS
+      IF l_bukrs_ant <> w_ZTBBC_LOG_CPI-bukrs or
+        l_iflow_ant <> w_ZTBBC_LOG_CPI-iflow.
+
+        if l_bukrs_ant <> w_ZTBBC_LOG_CPI-bukrs.
+*         Mudou a empresa, registra e zera contagem
+          w_estatistica-qtde_iflow = 0.
+          w_estatistica-bukrs       = l_bukrs_ant.
+          w_estatistica-qtde_bukrs  = l_n_bukrs.
+          APPEND w_estatistica TO t_estatistica.
+          w_estatistica-qtde_bukrs  = 0.
+          w_estatistica-iflow       = l_iflow_ant.
+          w_estatistica-qtde_iflow  = l_n_iflow.
+          w_estatistica-msg_size    = l_n_bytes_ifl.
+          w_estatistica-msg_size_kb = l_n_kbytes_ifl.
+          w_estatistica-msg_size_mb = l_n_mbytes_ifl.
+          APPEND w_estatistica TO t_estatistica.
+          CLEAR w_estatistica.
+          l_bukrs_ant               = w_ZTBBC_LOG_CPI-bukrs.
+          l_n_bukrs                 = 0.
+          l_iflow_ant               = w_ZTBBC_LOG_CPI-iflow.
+          l_n_iflow                 = 0.
+          l_n_bytes_buk             = 0.
+          l_n_bytes_ifl             = 0.
+          l_n_kbytes_buk            = 0.
+          L_N_KBYTES_IFL            = 0.
+          L_N_MBYTES_IFL            = 0.
+          l_n_mbytes_buk            = 0.
+
+        ELSEIF l_iflow_ant <> w_ZTBBC_LOG_CPI-iflow.
+*         Empresa igual, mas Iflow mudou
+          w_estatistica-bukrs       = l_bukrs_ant.
+          w_estatistica-iflow       = l_iflow_ant.
+          w_estatistica-qtde_iflow  = l_n_iflow.
+          w_estatistica-msg_size    = l_n_bytes_ifl.
+          w_estatistica-msg_size_kb = l_n_kbytes_ifl.
+          w_estatistica-msg_size_mb = l_n_mbytes_ifl.
+          w_estatistica-qtde_bukrs = 0.
+          APPEND w_estatistica TO t_estatistica.
+          CLEAR w_estatistica.
+          l_iflow_ant              = w_ZTBBC_LOG_CPI-iflow.
+          l_n_iflow                = 0.
+          l_n_bytes_ifl            = 0.
+          l_n_kbytes_ifl           = 0.
+          l_n_mbytes_ifl           = 0.
+
+        ENDIF.
+
+      ENDIF.
+
+*     Acumula quantidades
+      l_n_bukrs = l_n_bukrs + 1.
+      l_n_iflow = l_n_iflow + 1.
+*     Acumula tamanho das mensagens em bytes
+      l_n_bytes_ifl = l_n_bytes_ifl + w_ZTBBC_LOG_CPI-msg_size.
+      l_n_kbytes_ifl = l_n_kbytes_ifl + ( w_ZTBBC_LOG_CPI-msg_size / 1024 ).
+      l_n_mbytes_ifl = l_n_mbytes_ifl + ( ( w_ZTBBC_LOG_CPI-msg_size / 1024 ) / 1024 ).
+
+    endloop."loop at t_ZTBBC_LOG_CPI REFERENCE INTO data(w_ZTBBC_LOG_CPI).
+
+*   Após o LOOP, gravar o último grupo
+    if l_bukrs_ant > 0.
+      w_estatistica-iflow       = ''.
+      w_estatistica-qtde_iflow  = 0.
+      w_estatistica-bukrs       = w_ZTBBC_LOG_CPI-bukrs.
+      w_estatistica-qtde_bukrs  = l_n_bukrs.
+      w_estatistica-msg_size    = l_n_bytes_buk.
+      w_estatistica-msg_size_kb = l_n_kbytes_buk.
+      w_estatistica-msg_size_mb = l_n_mbytes_buk.
+      APPEND w_estatistica TO t_estatistica.
+      w_estatistica-qtde_bukrs  = 0.
+      w_estatistica-iflow       = w_ZTBBC_LOG_CPI-iflow.
+      w_estatistica-qtde_iflow  = l_n_iflow.
+      w_estatistica-msg_size    = l_n_bytes_ifl.
+      w_estatistica-msg_size_kb = l_n_kbytes_ifl.
+      w_estatistica-msg_size_mb = l_n_mbytes_ifl.
+      APPEND w_estatistica TO t_estatistica.
+      CLEAR w_estatistica.
+    ENDIF.
+
+  else.
+*   Sem detalhar por Iflow
+    loop at t_ZTBBC_LOG_CPI INTO w_ZTBBC_LOG_CPI.
+      IF l_bukrs_ant IS INITIAL AND l_iflow_ant IS INITIAL.
+*       Primeiro registro
+        l_bukrs_ant = w_ZTBBC_LOG_CPI-bukrs.
+        l_n_bukrs      = 0.
+        l_n_kbytes_buk = 0.
+        l_n_mbytes_buk = 0.
+      ENDIF.
+*     Se mudou o BUKRS
+      IF l_bukrs_ant <> w_ZTBBC_LOG_CPI-bukrs or
+*       Mudou a empresa, registra e zera contagem
+        w_estatistica-bukrs       = w_ZTBBC_LOG_CPI-bukrs.
+        w_estatistica-bukrs       = l_bukrs_ant.
+        w_estatistica-qtde_bukrs  = l_n_bukrs.
+        w_estatistica-msg_size    = l_n_bytes_buk.
+        w_estatistica-msg_size_kb = l_n_kbytes_buk.
+        w_estatistica-msg_size_mb = l_n_mbytes_buk.
+        APPEND w_estatistica TO t_estatistica.
+        CLEAR w_estatistica.
+        l_bukrs_ant              = w_ZTBBC_LOG_CPI-bukrs.
+        l_n_bukrs                = 0.
+        l_n_bytes_buk            = 0.
+        l_n_kbytes_buk           = 0 .
+        l_n_mbytes_buk           = 0 .
+      ENDIF.
+*     Acumula quantidades
+      l_n_bukrs = l_n_bukrs + 1.
+*     Acumula tamanho das mensagens em bytes
+      l_n_bytes_buk  = l_n_bytes_buk + w_ZTBBC_LOG_CPI-msg_size.
+      l_n_kbytes_buk = l_n_kbytes_buk + ( w_ZTBBC_LOG_CPI-msg_size / 1024 ).
+      l_n_mbytes_buk = l_n_mbytes_buk + ( ( w_ZTBBC_LOG_CPI-msg_size / 1024 ) / 1024 ).
+    endloop."loop at t_ZTBBC_LOG_CPI REFERENCE INTO data(w_ZTBBC_LOG_CPI).
+
+*   Após o LOOP, gravar o último grupo
+    if l_bukrs_ant > 0.
+      w_estatistica-bukrs       = w_ZTBBC_LOG_CPI-bukrs.
+      w_estatistica-qtde_bukrs  = l_n_bukrs.
+      w_estatistica-msg_size    = l_n_bytes_buk.
+      w_estatistica-msg_size_kb = l_n_kbytes_buk.
+      w_estatistica-msg_size_mb = l_n_mbytes_buk.
+      APPEND w_estatistica TO t_estatistica.
+    ENDIF.
+
+  endif.
+
+ENDFORM.   "zf_estatisticas
+*&---------------------------------------------------------------------*
+*&     Form zf_loopatscreen
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM zf_loopatscreen .
+
+  if p_btp is NOT INITIAL.
+    p_hor = ''.
+    p_ver = 'X'.
+  ENDIF.
+
+  LOOP AT SCREEN.
+    if p_btp is NOT INITIAL.
+      IF screen-group1 = 'Z1'.
+        screen-name = 1.
+        screen-input = 1.
+        screen-active = 1.
+        MODIFY SCREEN.
+      endif.
+    else.
+      IF screen-group1 = 'Z1'.
+        screen-name = 0.
+        screen-input = 0.
+        screen-active = 0.
+        MODIFY SCREEN.
+      endif.
+    endif.
+    if p_sap is NOT INITIAL.
+      IF screen-group1 = 'B1'.
+        screen-name = 1.
+        screen-input = 1.
+        screen-active = 1.
+        MODIFY SCREEN.
+      endif.
+    else.
+      IF screen-group1 = 'B1'.
+        screen-name = 0.
+        screen-input = 0.
+        screen-active = 0.
+        MODIFY SCREEN.
+      endif.
+    endif.
+  ENDLOOP.
+
+ENDFORM.   "zf_loopatscreen
+*&---------------------------------------------------------------------*
+*&     Form zf_message_log
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM zf_message_log .
+  data: l_http_rc          type sy-subrc,
+        l_reason           type String,
+        l_string           type String,
+        l_response         TYPE string,
+        l_xstring          TYPE xstring,
+        t_return           TYPE TABLE OF bapiret2,
+        t_xml_table        TYPE TABLE OF smum_xmltb,
+        l_client           TYPE REF TO if_http_client,
+        l_dest             TYPE rfcdest,
+        l_content_type     type String VALUE 'application/json',
+        l_param            type ZDEGL_PARAM value 'VSADEV',
+        t_ztbbc_parametros TYPE TABLE OF ztbbc_parametros,
+        l_fuso             type INT4,
+        l_data_fuso        type sy-datum,
+        l_data_hora        type sy-uzeit.
+
+  if sy-host cs '05c' or sy-host cs '05a'.
+*   Muda para parâmetros de Produção
+    l_param = 'VSAPRD'.
+  endif.
+
+  CALL FUNCTION 'ZFSD_CONSTANTES1'
+    EXPORTING
+      I_CODE           = 'ZCPI_LOGS'
+      I_PARAM          = l_param
+    TABLES
+      ZTBBC_PARAMETROS = t_ztbbc_parametros
+    EXCEPTIONS
+      NOT_FOUND        = 1
+      OTHERS           = 2.
+
+  IF line_exists( t_ztbbc_parametros[ zparam = l_param ] ).
+    l_dest =  t_ztbbc_parametros[ zparam = l_param ]-zvlpar.
+  endif.
+
+* Relacionar SM59 configurada para ambiente BTP
+  free: l_client.
+  cl_http_client=>create_by_destination(
+     EXPORTING destination = l_dest "SM59
+     IMPORTING client      = l_client ).
+
+  if P_msgid is NOT INITIAL or
+     P_corid is NOT INITIAL.
+*    Busca direta pelo GUID
+
+*   Informar no Header o nome da interface a ser chamada
+    CALL METHOD l_client->request->set_header_field
+      EXPORTING
+        name  = 'iflowname'
+        value = 'IF_VSA_MANAGEMENT_Get_MessageLog'.
+
+    if P_corid is NOT INITIAL.
+      l_string = 'CorrelationId%20eq%20%27GUID%27'.
+      REPLACE 'GUID' IN l_string WITH P_corid.
+    endif.
+
+    if P_msgid is NOT INITIAL.
+      l_string = 'MessageGuid%20eq%20%27GUID%27'.
+      REPLACE 'GUID' IN l_string WITH P_msgid.
+    endif.
+
+    CALL METHOD l_client->request->set_header_field
+      EXPORTING
+        name  = 'guid'
+        value = l_string.
+
+  else.
+
+    if P_custna is NOT INITIAL and P_custva is NOT INITIAL.
+*     Custom Header Informado
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'iflowname'
+          value = 'IF_VSA_MANAGEMENT_Get_MessageLogCustomHeader'.
+
+      if p_ziflow cs '*'.
+        l_string = p_ziflow.
+        TRANSLATE l_string USING '* '.
+      else.
+        l_string = p_ziflow.
+      endif.
+
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'iflownamelog'
+          value = l_string.
+      l_fuso = p_fuso.
+      l_fuso = l_fuso * -1.
+      if p_dst is NOT INITIAL.
+        l_fuso =  l_fuso - 1.
+      endif.
+
+*     Ajusta fuso horário dataDE
+*     A busca é sempre feito pelo GMT
+      CALL FUNCTION 'IGN_TIMESTAMP_PLUSMINUS'
+        EXPORTING
+          START_DATE      = p_zdata1
+          START_TIME      = p_zhora1
+          FORWARD         = 'X'
+          BACKWARD        = ''
+          HOURS           = l_fuso
+        IMPORTING
+          RESULT_DATE     = l_data_fuso
+          RESULT_TIME     = l_data_hora
+        EXCEPTIONS
+          PARAMETER_ERROR = 1
+          OTHERS          = 2.
+
+      concatenate l_data_fuso+0(4) '-' l_data_fuso+4(2) '-' l_data_fuso+6(2) 'T'
+                  l_data_hora+0(2) ':' l_data_hora+2(2) ':' l_data_hora+4(2)
+                  into l_string.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'logstart'
+          value = l_string.
+
+*     Ajusta fuso horário dataATé
+*     A busca é sempre feito pelo GMT
+      CALL FUNCTION 'IGN_TIMESTAMP_PLUSMINUS'
+        EXPORTING
+          START_DATE      = p_zdata2
+          START_TIME      = p_zhora2
+          FORWARD         = 'X'
+          BACKWARD        = ''
+          HOURS           = l_fuso
+        IMPORTING
+          RESULT_DATE     = l_data_fuso
+          RESULT_TIME     = l_data_hora
+        EXCEPTIONS
+          PARAMETER_ERROR = 1
+          OTHERS          = 2.
+
+      concatenate l_data_fuso+0(4) '-' l_data_fuso+4(2) '-' l_data_fuso+6(2) 'T'
+                  l_data_hora+0(2) ':' l_data_hora+2(2) ':' l_data_hora+4(2)
+                  into l_string.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'logend'
+          value = l_string.
+
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'guid'
+          value = ''.
+
+      CONCATENATE P_custna '''' '%20eq%20' '''' P_custva into l_string.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'custheader'
+          value = l_string.
+
+      l_string = P_Zstat.
+      if P_Zstat = ''. l_string = 'All'. endif.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'iflowstatus'
+          value = l_string.
+
+    else.
+*     Informar no Header o nome da interface a ser chamada
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'iflowname'
+          value = 'IF_VSA_MANAGEMENT_Get_MessageLog'.
+
+      if p_ziflow cs '*'.
+        l_string = p_ziflow.
+        TRANSLATE l_string USING '* '.
+      else.
+        l_string = p_ziflow.
+      endif.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'iflownamelog'
+          value = l_string.
+
+      l_fuso = p_fuso.
+      l_fuso = l_fuso * -1.
+      if p_dst is NOT INITIAL.
+        l_fuso =  l_fuso - 1.
+      endif.
+
+*     Ajusta fuso horário dataDE
+*     A busca é sempre feito pelo GMT
+      CALL FUNCTION 'IGN_TIMESTAMP_PLUSMINUS'
+        EXPORTING
+          START_DATE      = p_zdata1
+          START_TIME      = p_zhora1
+          FORWARD         = 'X'
+          BACKWARD        = ''
+          HOURS           = l_fuso
+        IMPORTING
+          RESULT_DATE     = l_data_fuso
+          RESULT_TIME     = l_data_hora
+        EXCEPTIONS
+          PARAMETER_ERROR = 1
+          OTHERS          = 2.
+
+      concatenate l_data_fuso+0(4) '-' l_data_fuso+4(2) '-' l_data_fuso+6(2) 'T'
+                  l_data_hora+0(2) ':' l_data_hora+2(2) ':' l_data_hora+4(2)
+                  into l_string.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'logstart'
+          value = l_string.
+
+*     Ajusta fuso horário dataATé
+*     A busca é sempre feito pelo GMT
+      CALL FUNCTION 'IGN_TIMESTAMP_PLUSMINUS'
+        EXPORTING
+          START_DATE      = p_zdata2
+          START_TIME      = p_zhora2
+          FORWARD         = 'X'
+          BACKWARD        = ''
+          HOURS           = l_fuso
+        IMPORTING
+          RESULT_DATE     = l_data_fuso
+          RESULT_TIME     = l_data_hora
+        EXCEPTIONS
+          PARAMETER_ERROR = 1
+          OTHERS          = 2.
+
+      concatenate l_data_fuso+0(4) '-' l_data_fuso+4(2) '-' l_data_fuso+6(2) 'T'
+                  l_data_hora+0(2) ':' l_data_hora+2(2) ':' l_data_hora+4(2)
+                  into l_string.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'logend'
+          value = l_string.
+
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'guid'
+          value = ''.
+
+      l_string = P_Zstat.
+      if P_Zstat = ''. l_string = 'ALL'. endif.
+      CALL METHOD l_client->request->set_header_field
+        EXPORTING
+          name  = 'iflowstatus'
+          value = l_string.
+
+    endif."if P_custna is INITIAL.
+
+  endif."if P_msgid is NOT INITIAL or
+
+  l_client->request->set_method(  if_http_request=>co_request_method_post ).
+  l_client->request->set_content_type( l_content_type ).
+* Chamada do Iflow
+  l_client->send( ).
+* Retorno do Iflow
+  l_client->receive( ).
+* Status do Iflow
+  l_client->response->get_status( IMPORTING
+                                    code   = l_http_rc
+                                    reason = l_reason ).
+* Leitura do response
+  l_response = l_client->response->get_cdata( ).
+  free: l_client.
+
+  if l_http_rc = 200.
+
+*   XML para tabela interna
+    CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+      EXPORTING
+        text   = l_response
+      IMPORTING
+        buffer = l_xstring
+      EXCEPTIONS
+        failed = 1
+        OTHERS = 2.
+
+    CALL FUNCTION 'SMUM_XML_PARSE'
+      EXPORTING
+        xml_input = l_xstring
+      TABLES
+        xml_table = t_xml_table
+        return    = t_return.
+
+    free: t_messagelogs.
+
+    do.
+*     Procura a tag Properties
+      READ TABLE t_xml_table WITH KEY cname = 'properties' TRANSPORTING NO FIELDS.
+      if sy-subrc ne 0.
+*       Todos os pacotes lidos, sair do loop.
+        exit.
+      else.
+        data(l_indice) = sy-tabix.
+        data(l_indice_limpeza) = 1.
+        do.
+*         Elimina registros anteriores ao properties.
+          delete t_xml_table index 1.
+          l_indice_limpeza = l_indice_limpeza + 1.
+          if l_indice_limpeza = l_indice.
+*           Chegou no 'properties'
+            delete t_xml_table INDEX 1."deleta 'properties'
+            exit.
+          endif.
+        enddo.
+
+        clear: W_messagelogs.
+        W_messagelogs-MessageGuid                 = t_xml_table[ cname = 'MessageGuid' ]-cvalue.
+        W_messagelogs-CorrelationId               = t_xml_table[ cname = 'CorrelationId' ]-cvalue.
+        W_messagelogs-LogStart                    = t_xml_table[ cname = 'LogStart' ]-cvalue.
+        W_messagelogs-LogEnd                      = t_xml_table[ cname = 'LogEnd' ]-cvalue.
+        CONCATENATE W_messagelogs-LogStart+0(4) W_messagelogs-LogStart+5(2)
+                    W_messagelogs-LogStart+8(2) into W_messagelogs-data.
+        CONCATENATE W_messagelogs-LogStart+11(2) W_messagelogs-LogStart+14(2)
+                    W_messagelogs-LogStart+17(2) into W_messagelogs-hora.
+        W_messagelogs-horagmt = W_messagelogs-hora.
+        W_messagelogs-datagmt = W_messagelogs-data.
+        l_fuso = p_fuso.
+        l_fuso = l_fuso * -1.
+        if p_dst is NOT INITIAL.
+          l_fuso = l_fuso - 1.
+        endif.
+        CALL FUNCTION 'IGN_TIMESTAMP_PLUSMINUS'
+          EXPORTING
+            START_DATE      = W_messagelogs-data
+            START_TIME      = W_messagelogs-hora
+            FORWARD         = ''
+            BACKWARD        = 'X'
+            HOURS           = l_fuso
+          IMPORTING
+            RESULT_DATE     = W_messagelogs-data
+            RESULT_TIME     = W_messagelogs-hora
+          EXCEPTIONS
+            PARAMETER_ERROR = 1
+            OTHERS          = 2.
+        W_messagelogs-IntegrationFlowName         = t_xml_table[ cname = 'IntegrationFlowName' ]-cvalue.
+        W_messagelogs-Status                      = t_xml_table[ cname = 'Status' ]-cvalue.
+        W_messagelogs-LogLevel                    = t_xml_table[ cname = 'LogLevel' ]-cvalue.
+        W_messagelogs-CustomStatus                = t_xml_table[ cname = 'CustomStatus' ]-cvalue.
+        W_messagelogs-OriginComponentName         = t_xml_table[ cname = 'OriginComponentName' ]-cvalue.
+        W_messagelogs-LocalComponentName          = t_xml_table[ cname = 'LocalComponentName' ]-cvalue.
+        W_messagelogs-TransactionId               = t_xml_table[ cname = 'TransactionId' ]-cvalue.
+        append W_messagelogs to T_messagelogs.
+
+      endif.
+    enddo.
+
+*   Filtro de Package
+    if P_btp is NOT INITIAL.
+      if P_ZIFLOW ns '*'.
+        delete t_messagelogs WHERE IntegrationFlowName ne P_ZIFLOW.
+      endif.
+      if P_ZIFLOW cs '*'.
+        delete t_messagelogs WHERE IntegrationFlowName np P_ZIFLOW.
+      endif.
+    endif.
+
+  endif."if l_http_rc = 200.
+
+ENDFORM.   "zf_message_log
+
+
+*&---------------------------------------------------------------------*
+*&     Form zf_message_log_errorinfo
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM zf_message_log_errorinfo USING p_guid
+                              CHANGING p_response.
+  data: l_http_rc          type sy-subrc,
+        l_reason           type String,
+        l_string           type String,
+        l_response         TYPE string,
+        l_xstring          TYPE xstring,
+        t_return           TYPE TABLE OF bapiret2,
+        t_xml_table        TYPE TABLE OF smum_xmltb,
+        l_client           TYPE REF TO if_http_client,
+        l_dest             TYPE rfcdest,
+        l_content_type     type String VALUE 'application/json',
+        l_param            type ZDEGL_PARAM value 'VSADEV',
+        t_ztbbc_parametros TYPE TABLE OF ztbbc_parametros,
+        l_fuso             type INT4.
+
+  if sy-host cs '05c' or sy-host cs '05a'.
+*   Muda para parâmetros de Produção
+    l_param = 'VSAPRD'.
+  endif.
+
+  CALL FUNCTION 'ZFSD_CONSTANTES1'
+    EXPORTING
+      I_CODE           = 'ZCPI_LOGS'
+      I_PARAM          = l_param
+    TABLES
+      ZTBBC_PARAMETROS = t_ztbbc_parametros
+    EXCEPTIONS
+      NOT_FOUND        = 1
+      OTHERS           = 2.
+
+  IF line_exists( t_ztbbc_parametros[ zparam = l_param ] ).
+    l_dest =  t_ztbbc_parametros[ zparam = l_param ]-zvlpar.
+  endif.
+
+* Relacionar SM59 configurada para ambiente BTP
+  free: l_client.
+  cl_http_client=>create_by_destination(
+     EXPORTING destination = l_dest "SM59
+     IMPORTING client      = l_client ).
+
+* Informar no Header o nome da interface a ser chamada
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'iflowname'
+      value = 'IF_VSA_MANAGEMENT_Get_MessageLogErrorInformation'.
+
+  l_string = p_guid.
+
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'messageguid'
+      value = l_string.
+
+  l_client->request->set_method(  if_http_request=>co_request_method_post ).
+  l_client->request->set_content_type( l_content_type ).
+* Chamada do Iflow
+  l_client->send( ).
+* Retorno do Iflow
+  l_client->receive( ).
+* Status do Iflow
+  l_client->response->get_status( IMPORTING
+                                    code   = l_http_rc
+                                    reason = l_reason ).
+* Leitura do response
+  l_response = l_client->response->get_cdata( ).
+  free: l_client.
+
+
+  if l_http_rc = 200 or l_http_rc = 202 or l_http_rc = 204.
+    p_response = l_response.
+  endif."if l_http_rc = 200.
+
+ENDFORM.   "zf_message_log_errorinfo
+
+*&---------------------------------------------------------------------*
+*&     Form zf_message_log_attach
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM zf_message_log_attach USING p_guid
+                                 p_id
+                           CHANGING p_response.
+  TYPES:y_t_node_table     TYPE STANDARD TABLE OF REF TO if_ixml_node.
+  data: l_http_rc          type sy-subrc,
+        l_reason           type String,
+        l_string           type String,
+        l_response         TYPE string,
+        l_xstring          TYPE xstring,
+        t_return           TYPE TABLE OF bapiret2,
+        t_xml_table        TYPE TABLE OF smum_xmltb,
+        l_client           TYPE REF TO if_http_client,
+        l_dest             TYPE rfcdest,
+        l_content_type     type String VALUE 'application/json',
+        l_param            type ZDEGL_PARAM value 'VSADEV',
+        t_ztbbc_parametros TYPE TABLE OF ztbbc_parametros,
+        l_fuso             type INT4,
+        l_tam              type i,
+        l_pos_end_tag      type i,
+        l_value            TYPE string,
+        l_start            TYPE i,
+        l_end              TYPE i.
+
+  if sy-host cs '05c' or sy-host cs '05a'.
+*   Muda para parâmetros de Produção
+    l_param = 'VSAPRD'.
+  endif.
+
+  CALL FUNCTION 'ZFSD_CONSTANTES1'
+    EXPORTING
+      I_CODE           = 'ZCPI_LOGS'
+      I_PARAM          = l_param
+    TABLES
+      ZTBBC_PARAMETROS = t_ztbbc_parametros
+    EXCEPTIONS
+      NOT_FOUND        = 1
+      OTHERS           = 2.
+
+  IF line_exists( t_ztbbc_parametros[ zparam = l_param ] ).
+    l_dest =  t_ztbbc_parametros[ zparam = l_param ]-zvlpar.
+  endif.
+
+* Relacionar SM59 configurada para ambiente BTP
+  free: l_client.
+  cl_http_client=>create_by_destination(
+     EXPORTING destination = l_dest "SM59
+     IMPORTING client      = l_client ).
+
+* Informar no Header o nome da interface a ser chamada
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'iflowname'
+      value = 'IF_VSA_MANAGEMENT_Get_MessageLogAttachments'.
+
+  l_string = p_guid.
+
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'messageguid'
+      value = l_string.
+
+  l_string = p_id.
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'anexoid'
+      value = l_string.
+
+  l_client->request->set_method(  if_http_request=>co_request_method_post ).
+  l_client->request->set_content_type( l_content_type ).
+* Anexando Payload
+  l_client->request->set_cdata( data = l_string ).
+* Chamada do Iflow
+  l_client->send( ).
+* Retorno do Iflow
+  l_client->receive( ).
+* Status do Iflow
+  l_client->response->get_status( IMPORTING
+                                    code   = l_http_rc
+                                    reason = l_reason ).
+* Leitura do response
+  l_response = l_client->response->get_cdata( ).
+  CLEAR p_response.
+
+  if p_id is NOT INITIAL.
+*    Retorna o conteúdo dos anexos
+    if l_http_rc = 200 or l_http_rc = 202 or l_http_rc = 204.
+      p_response = l_response.
+    endif."if l_http_rc = 200.
+
+  else.
+*   Retorna o ID dos anexo.
+    free: l_client, t_attachment.
+
+    " Encontrar índice inicial da tag <node1>
+    if l_http_rc = 200.
+      do.
+        l_start = 0.
+        FIND '<d:Id>' IN l_response MATCH OFFSET l_start.
+        IF sy-subrc = 0.
+          l_start = l_start + strlen('<d:Id>').
+          " Encontrar índice final antes da tag </node1>
+          FIND '</d:Id>' IN l_response MATCH OFFSET l_end.
+          IF sy-subrc = 0 AND l_end > l_start.
+            l_tam = l_end - l_start.
+            l_value = l_response+l_start(l_tam).
+            W_attachment-id = l_value.
+*           Apagar do início da tag de abertura até o final da tag fechamento
+            l_pos_end_tag = l_end + strlen('</d:Id>'). " posição depois da tag fechamento
+            l_response = l_response+l_pos_end_tag.
+          ENDIF.
+        else.
+          exit.
+        ENDIF.
+        l_start = 0.
+        FIND '<d:MessageGuid>' IN l_response MATCH OFFSET l_start.
+        IF sy-subrc = 0.
+          l_start = l_start + strlen('<d:MessageGuid>').
+          " Encontrar índice final antes da tag </node1>
+          FIND '</d:MessageGuid>' IN l_response MATCH OFFSET l_end.
+          IF sy-subrc = 0 AND l_end > l_start.
+            l_tam = l_end - l_start.
+            l_value = l_response+l_start(l_tam).
+            W_attachment-MessageGuid = l_value.
+*           Apagar do início da tag de abertura até o final da tag fechamento
+            l_pos_end_tag = l_end + strlen('</d:MessageGuid>'). " posição depois da tag fechamento
+            l_response = l_response+l_pos_end_tag.
+          ENDIF.
+        ENDIF.
+        l_start = 0.
+        FIND '<d:Name>' IN l_response MATCH OFFSET l_start.
+        IF sy-subrc = 0.
+          l_start = l_start + strlen('<d:Name>').
+          " Encontrar índice final antes da tag </node1>
+          FIND '</d:Name>' IN l_response MATCH OFFSET l_end.
+          IF sy-subrc = 0 AND l_end > l_start.
+            l_tam = l_end - l_start.
+            l_value = l_response+l_start(l_tam).
+            W_attachment-name = l_value.
+*           Apagar do início da tag de abertura até o final da tag fechamento
+            l_pos_end_tag = l_end + strlen('</d:Name>'). " posição depois da tag fechamento
+            l_response = l_response+l_pos_end_tag.
+          ENDIF.
+        ENDIF.
+        l_start = 0.
+        FIND '<d:ContentType>' IN l_response MATCH OFFSET l_start.
+        IF sy-subrc = 0.
+          l_start = l_start + strlen('<d:ContentType>').
+          " Encontrar índice final antes da tag </node1>
+          FIND '</d:ContentType>' IN l_response MATCH OFFSET l_end.
+          IF sy-subrc = 0 AND l_end > l_start.
+            l_tam = l_end - l_start.
+            l_value = l_response+l_start(l_tam).
+            W_attachment-ContentType = l_value.
+*           Apagar do início da tag de abertura até o final da tag fechamento
+            l_pos_end_tag = l_end + strlen('</d:ContentType>'). " posição depois da tag fechamento
+            l_response = l_response+l_pos_end_tag.
+          ENDIF.
+        ENDIF.
+        append W_attachment to t_attachment.
+      enddo.
+    endif.
+
+  endif." if p_id is not INITIAL.
+
+ENDFORM.   "zf_message_log_attach
+
+
+*&---------------------------------------------------------------------*
+*&     Form zf_message_customheader
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM zf_message_customheader USING p_guid
+                             CHANGING p_response.
+  data: l_http_rc          type sy-subrc,
+        l_reason           type String,
+        l_string           type String,
+        l_response         TYPE string,
+        l_xstring          TYPE xstring,
+        t_return           TYPE TABLE OF bapiret2,
+        t_xml_table        TYPE TABLE OF smum_xmltb,
+        l_client           TYPE REF TO if_http_client,
+        l_dest             TYPE rfcdest,
+        l_content_type     type String VALUE 'application/json',
+        l_param            type ZDEGL_PARAM value 'VSADEV',
+        t_ztbbc_parametros TYPE TABLE OF ztbbc_parametros,
+        l_fuso             type INT4.
+
+  if sy-host cs '05c' or sy-host cs '05a'.
+*   Muda para parâmetros de Produção
+    l_param = 'VSAPRD'.
+  endif.
+
+  CALL FUNCTION 'ZFSD_CONSTANTES1'
+    EXPORTING
+      I_CODE           = 'ZCPI_LOGS'
+      I_PARAM          = l_param
+    TABLES
+      ZTBBC_PARAMETROS = t_ztbbc_parametros
+    EXCEPTIONS
+      NOT_FOUND        = 1
+      OTHERS           = 2.
+
+  IF line_exists( t_ztbbc_parametros[ zparam = l_param ] ).
+    l_dest =  t_ztbbc_parametros[ zparam = l_param ]-zvlpar.
+  endif.
+
+* Relacionar SM59 configurada para ambiente BTP
+  free: l_client.
+  cl_http_client=>create_by_destination(
+     EXPORTING destination = l_dest "SM59
+     IMPORTING client      = l_client ).
+
+* Informar no Header o nome da interface a ser chamada
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'iflowname'
+      value = 'IF_VSA_MANAGEMENT_Get_MessageLogCustomHeaderValue'.
+
+  l_string = p_guid.
+
+  CALL METHOD l_client->request->set_header_field
+    EXPORTING
+      name  = 'messageguid'
+      value = l_string.
+
+  l_client->request->set_method(  if_http_request=>co_request_method_post ).
+  l_client->request->set_content_type( l_content_type ).
+* Chamada do Iflow
+  l_client->send( ).
+* Retorno do Iflow
+  l_client->receive( ).
+* Status do Iflow
+  l_client->response->get_status( IMPORTING
+                                    code   = l_http_rc
+                                    reason = l_reason ).
+* Leitura do response
+  l_response = l_client->response->get_cdata( ).
+  free: l_client, l_xstring.
+
+* XML para tabela interna
+  CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
+    EXPORTING
+      text   = l_response
+    IMPORTING
+      buffer = l_xstring
+    EXCEPTIONS
+      failed = 1
+      OTHERS = 2.
+
+  CALL FUNCTION 'SMUM_XML_PARSE'
+    EXPORTING
+      xml_input = l_xstring
+    TABLES
+      xml_table = t_xml_table
+      return    = t_return.
+
+  free: T_customheader, l_response.
+
+  do.
+*   Procura a tag Properties
+    READ TABLE t_xml_table WITH KEY cname = 'properties' TRANSPORTING NO FIELDS.
+    if sy-subrc ne 0.
+*     Todos os pacotes lidos, sair do loop.
+      exit.
+    else.
+      data(l_indice) = sy-tabix.
+      data(l_indice_limpeza) = 1.
+      do.
+*       Elimina registros anteriores ao properties.
+        delete t_xml_table index 1.
+        l_indice_limpeza = l_indice_limpeza + 1.
+        if l_indice_limpeza = l_indice.
+*         Chegou no 'properties'
+          delete t_xml_table INDEX 1."deleta 'properties'
+          exit.
+        endif.
+      enddo.
+      clear: W_customheader.
+      W_customheader-id         = t_xml_table[ cname = 'Id' ]-cvalue.
+      W_customheader-Name       = t_xml_table[ cname = 'Name' ]-cvalue.
+      W_customheader-value      = t_xml_table[ cname = 'Value' ]-cvalue.
+      CONCATENATE l_response '/' W_customheader-Name '=' W_customheader-value into l_response.
+      append W_customheader to T_customheader.
+
+    endif.
+  enddo.
+
+  CLEAR p_response.
+  if l_http_rc = 200 or l_http_rc = 202 or l_http_rc = 204.
+
+    p_response = l_response.
+
+  endif."if l_http_rc = 200.
+
+ENDFORM.   "zf_message_customheader
+
+*&---------------------------------------------------------------------*
+*&     Form zf_ajusta_horas
+*&---------------------------------------------------------------------*
+*&     text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM zf_ajusta_horas .
+  data: l_minutos TYPE INT4,
+        l_date    TYPE sy-datum,
+        l_time    TYPE sy-uzeit.
+
+  if p_zp15 is NOT INITIAL. l_minutos = '-15'. endif.
+  if p_zp60 is NOT INITIAL. l_minutos = '-60'. endif.
+  if p_zp1d is NOT INITIAL. l_minutos = '-1440'. endif.
+  if p_zp2d is NOT INITIAL. l_minutos = '-2880'. endif.
+
+  p_zdata2 = l_date = sy-datum.
+  p_zhora2 = l_time = sy-uzeit.
+
+  CALL FUNCTION 'IGN_TIMESTAMP_PLUSMINUS'
+    EXPORTING
+      START_DATE      = l_date
+      START_TIME      = l_time
+      MINUTES         = l_minutos
+    IMPORTING
+      RESULT_DATE     = l_date
+      RESULT_TIME     = l_time
+    EXCEPTIONS
+      PARAMETER_ERROR = 1
+      OTHERS          = 2.
+
+  p_zdata1 = l_date.
+  p_zhora1 = l_time.
+
+ENDFORM.   "zf_ajusta_horas
